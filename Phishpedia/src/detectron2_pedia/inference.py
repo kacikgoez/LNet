@@ -60,7 +60,7 @@ def vis(img_path, pred_boxes, logo_conf=None):
     :return None
     '''
     check = cv2.imread(img_path)
-    pred_boxes = pred_boxes.numpy() if not isinstance(pred_boxes, np.ndarray) else pred_boxes
+    pred_boxes = pred_boxes.cpu().numpy() if not isinstance(pred_boxes, np.ndarray) else pred_boxes
 
     # draw rectangle
     for j, box in enumerate(pred_boxes):
