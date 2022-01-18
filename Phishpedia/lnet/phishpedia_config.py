@@ -17,7 +17,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 ele_model = config_rcnn(cfg_path, device, weights_path, conf_threshold=0.05)
 
 layout_model = WebLayoutNet().cuda() if device == 'cuda' else WebLayoutNet()
-layout_model.load_state_dict(torch.load("./layoutnet/model.pth", map_location=device))
+layout_model.load_state_dict(torch.load("./layoutnet/models/final-3d-7c-3s.pth", map_location=device))
 layout_model.to(device)
 # Evaluation mode to avoid batch norm issue
 layout_model.eval()
