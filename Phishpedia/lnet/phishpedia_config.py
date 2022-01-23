@@ -27,7 +27,7 @@ layout_model.eval()
 print('Load protected logo list')
 pedia_model, logo_feat_list, file_name_list = phishpedia_config(num_classes=277,
                                                 weights_path='../src/siamese_pedia/resnetv2_rgb_new.pth.tar',
-                                                targetlist_path='../src/siamese_pedia/expand_targetlist/')
+                                                targetlist_path=r"/Volumes/GoogleDrive/Meine Ablage/LNet/Phishpedia/src/siamese_pedia/expand_targetlist")
 
 
 print('Finish loading protected logo list')
