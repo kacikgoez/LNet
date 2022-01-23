@@ -18,7 +18,7 @@ ele_model = config_rcnn(cfg_path, device, weights_path, conf_threshold=0.05)
 print('Load protected logo list')
 pedia_model, logo_feat_list, file_name_list = phishpedia_config(num_classes=277,
                                                 weights_path='../src/siamese_pedia/resnetv2_rgb_new.pth.tar',
-                                                targetlist_path='../src/siamese_pedia/expand_targetlist/')
+                                                targetlist_path='../src/siamese_pedia/additional/')
 
 print('Finish loading protected logo list')
 print(logo_feat_list.shape)

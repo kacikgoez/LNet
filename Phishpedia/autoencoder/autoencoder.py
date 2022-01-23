@@ -1,146 +1,126 @@
-from __future__ import print_function
-import argparse
 import torch
-import torch.utils.data
-from torch import nn, optim
-from torch.nn import functional as F
-from torchvision import transforms
-from torchvision.utils import save_image
+import torch.utils.data as D
+import torch.nn as nn
+import torch.nn.functional as F
 from data import LogoLoader
+from bihalf import *
+import numpy as np
+from torchsummary import summary
+
+zdimGlob = 64
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
 
 
-'''parser = argparse.ArgumentParser(description='VAE MNIST Example')
-parser.add_argument('--batch-size', type=int, default=128, metavar='N',
-                    help='input batch size for training (default: 128)')
-parser.add_argument('--epochs', type=int, default=10, metavar='N',
-                    help='number of epochs to train (default: 10)')
-parser.add_argument('--no-cuda', action='store_true', default=False,
-                    help='disables CUDA training')
-parser.add_argument('--seed', type=int, default=1, metavar='S',
-                    help='random seed (default: 1)')
-parser.add_argument('--log-interval', type=int, default=10, metavar='N',
-                    help='how many batches to wait before logging training status')
-args = parser.parse_args()
-args.cuda = not args.no_cuda and torch.cuda.is_available()
-
-torch.manual_seed(args.seed)'''
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-kwargs = {'num_workers': 1, 'pin_memory': True} if torch.cuda.is_available() else {}
-
-dataset = LogoLoader("/content/drive/MyDrive/Phishpedia/src/siamese_pedia/expand_targetlist")
-
-train_loader = torch.utils.data.DataLoader(
-    dataset,
-    batch_size=16, shuffle=True, **kwargs)
-
-test_loader = torch.utils.data.DataLoader(
-    dataset,
-    batch_size=16, shuffle=True, **kwargs)
+class UnFlatten(nn.Module):
+    def forward(self, input, size=160):
+        return input.view(input.size(0), 32, 5)
 
 
 class VAE(nn.Module):
-    def __init__(self):
+    def __init__(self, image_channels=1, h_dim=160, z_dim=zdimGlob):
         super(VAE, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv1d(image_channels, 16, kernel_size=4, stride=2),
+            nn.BatchNorm1d(16),
+            nn.ReLU(),
+            nn.Conv1d(16, 24, kernel_size=8, stride=4),
+            nn.BatchNorm1d(24),
+            nn.ReLU(),
+            nn.Conv1d(24, 24, kernel_size=16, stride=4),
+            nn.BatchNorm1d(24),
+            nn.ReLU(),
+            nn.Conv1d(24, 32, kernel_size=24, stride=8),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            Flatten()
+            #nn.Conv1d(64, 128, kernel_size=32, stride=8),
+            #nn.BatchNorm1d(128),
+            #nn.ReLU(),
+            #Flatten()
+        )
 
-        #self.fc1 = nn.Linear(2048, 1024)
-        #self.fc21 = nn.Linear(1024, 64)
-        #self.fc22 = nn.Linear(1024, 64)
-        #self.fc3 = nn.Linear(64, 1024)
-        #self.fc4 = nn.Linear(1024, 2048)
+        self.fc1 = nn.Linear(h_dim, z_dim)
+        self.fc2 = nn.Linear(h_dim, z_dim)
+        self.fc3 = nn.Linear(z_dim, h_dim)
 
-        self.fc1 = nn.Conv1d(1, 64, 4, padding=1)
-        self.fc2 = nn.Conv1d(64, 32, 3)
-        self.fc21 = nn.Conv1d(32, 16, 2)
-        self.fc22 = nn.Conv1d(32, 16, 2)
-        self.fc3 = nn.Conv1d(16, 32, 2)
-        self.fc4 = nn.ConvTranspose1d(32, 64, 3)
-        self.fc5 = nn.ConvTranspose1d(64, 1, 4)
-
-    def encode(self, x):
-        x = x.unsqueeze(1)
-        h1 = F.relu(self.fc2(F.relu(self.fc1(x))))
-        return self.fc21(h1), self.fc22(h1)
+        self.decoder = nn.Sequential(
+            UnFlatten(),
+            nn.ConvTranspose1d(32, 24, kernel_size=28, stride=8),
+            nn.BatchNorm1d(24),
+            nn.ReLU(),
+            nn.ConvTranspose1d(24, 24, kernel_size=18, stride=4),
+            nn.BatchNorm1d(24),
+            nn.ReLU(),
+            nn.ConvTranspose1d(24, 16, kernel_size=11, stride=4),
+            nn.BatchNorm1d(16),
+            nn.ReLU(),
+            nn.ConvTranspose1d(16, image_channels, kernel_size=4, stride=2),
+            nn.BatchNorm1d(image_channels),
+            nn.Sigmoid()
+        )
 
     def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5*logvar)
-        eps = torch.randn_like(std)
-        return mu + eps*std
+        std = logvar.mul(0.5).exp_()
+        # return torch.normal(mu, std)
+        esp = torch.randn(*mu.size()).to(device)
+        z = mu + std * esp
+        return z
 
-    def decode(self, z):
-        h3 = F.relu(self.fc4(F.relu(self.fc3(z))))
-        return torch.sigmoid(self.fc5(h3))
+    def bottleneck(self, h):
+        mu, logvar = self.fc1(h), self.fc2(h)
+        z = self.reparameterize(mu, logvar)
+        return z, mu, logvar
+
+    def representation(self, x):
+        return self.bottleneck(self.encoder(x))[0]
 
     def forward(self, x):
-        mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
+        h = self.encoder(x)
+        z, mu, logvar = self.bottleneck(h)
+        hash = hash_layer(min_max_normalization(torch.round(z), 0, 1))
+        z = self.fc3(hash)
+        return self.decoder(z), mu, logvar
 
 
-model = VAE().to(device)
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
-
-
-# Reconstruction + KL divergence losses summed over all elements and batch
-def loss_function(recon_x, x, mu, logvar):
-    #BCE = F.binary_cross_entropy(recon_x, x, reduction='sum')
-    MSE = F.mse_loss(recon_x, x, reduction='sum')
+def loss_fn(recon_x, x, mu, logvar):
+    BCE = F.binary_cross_entropy(recon_x, x, size_average=False)
+    # BCE = F.mse_loss(recon_x, x, size_average=False)
 
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-    # https://arxiv.org/abs/1312.6114
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return MSE + KLD
-
-
-log_interval = 100
-batch_size = 16
-epochs = 100
-
-def train(epoch):
-    model.train()
-    train_loss = 0
-    batch_idx = 0
-    for index, (data, _) in enumerate(train_loader):
-        if isinstance(data, torch.Tensor):
-            batch_idx += 1
-            data = data.to(device)
-            optimizer.zero_grad()
-            recon_batch, mu, logvar = model(data)
-            loss = loss_function(recon_batch, data, mu, logvar)
-            loss.backward()
-            train_loss += loss.item()
-            optimizer.step()
-            if batch_idx % log_interval == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader),
-                    loss.item() / len(data)))
-
-    print('====> Epoch: {} Average loss: {:.4f}'.format(
-          epoch, train_loss / len(train_loader.dataset)))
-
-
-def test(epoch):
-    model.eval()
-    test_loss = 0
-    with torch.no_grad():
-        for index, (data, _) in enumerate(test_loader):
-            data = data.to(device)
-            recon_batch, mu, logvar = model(data)
-            test_loss += loss_function(recon_batch, data, mu, logvar).item()
-
-    test_loss /= len(test_loader.dataset)
-    print('====> Test set loss: {:.4f}'.format(test_loss))
+    return BCE + KLD, BCE, KLD
 
 if __name__ == "__main__":
-    for epoch in range(1, epochs + 1):
-        train(epoch)
-        test(epoch)
-        '''with torch.no_grad():
-            sample = torch.randn(1, 20).to(device)
-            sample = model.decode(sample).cpu()'''
-    torch.save(model.state_dict(), "./model.pth")
+
+    model = VAE(image_channels=1).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    epochs = 20
+    bs = 32
+    ite = 1
+
+    dataset = LogoLoader("/content/drive/MyDrive/Phishpedia/src/siamese_pedia/expand_targetlist", batch_size=bs)
+    dataloader = D.DataLoader(dataset, batch_size=bs, shuffle=True)
+
+    for epoch in range(epochs):
+        print("Epoch " + str(ite))
+        ite += 1
+        for idx, (images) in enumerate(dataloader):
+            recon_images, mu, logvar = model(images)
+            loss, bce, kld = loss_fn(recon_images.to(device), images.to(device), mu, logvar)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            to_print = "Epoch[{}/{}] Loss: {:.3f} {:.3f} {:.3f}".format(epoch+1,
+                                    epochs, loss.item(), bce.item()/bs, kld.item()/bs)
+
+    torch.save(model.state_dict(), str(zdimGlob) + '-vae.torch')
+
