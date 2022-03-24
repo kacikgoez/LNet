@@ -26,3 +26,10 @@ Lets you evaluate a single or multiple URLs. Once started, a prompt asks for a U
 ```shell 
 python phishpedia_main_url.py 
 ```
+
+- ```lnet_main.py```:
+```lnet_main.py``` contains the altered procedure of Phishpedia and all the new functionality added.
+
+
+- ```transparency-scan.py```:
+```transparency-scan.py``` looks for image files with a transparent background. Transparent backgrounds can cause issues with the Siamese network.
