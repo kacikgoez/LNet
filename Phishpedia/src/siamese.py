@@ -1,6 +1,6 @@
 from src.siamese_pedia.siamese_retrain.bit_pytorch.models import KNOWN_MODELS
 from src.siamese_pedia.utils import brand_converter
-from src.siamese_pedia.inference import siamese_inference, pred_siamese
+from src.siamese_pedia.inference import siamese_inference, pred_siamese, lnet_siamese_inference
 import torch
 import numpy as np
 from torchvision import ops
@@ -8,8 +8,12 @@ from collections import OrderedDict
 import pickle
 from tqdm import tqdm
 import tldextract
+import os
+from copy import copy
+from PIL import Image
+import time
 
-def phishpedia_config(num_classes:int, weights_path:str, targetlist_path:str, grayscale=False):
+def phishpedia_config(num_classes:int, weights_path:str, targetlist_path:str, keras_pipeline, grayscale=False):
     '''
     Load phishpedia configurations
     :param num_classes: number of protected brands
@@ -37,17 +41,63 @@ def phishpedia_config(num_classes:int, weights_path:str, targetlist_path:str, gr
     model.to(device)
     model.eval()
 
-#     Prediction for targetlists
     logo_feat_list = []
+    word_list = []
     file_name_list = []
+    removed_list = None
 
-    #with open("/content/drive/MyDrive/Phishpedia/database.pickle", "rb") as db:
-    with open("../database.pickle", "rb") as db:
-        dataLoad = pickle.load(db)
-        logo_feat_list = dataLoad[0]
-        file_name_list = dataLoad[1]
-        
-    return model, np.asarray(logo_feat_list), np.asarray(file_name_list)
+    # Load embeddings that were saved prior
+    if os.path.exists(r"../database.pickle"):
+        with open("../database.pickle", "rb") as db:
+            dataLoad = pickle.load(db)
+            logo_feat_list = dataLoad[0]
+            file_name_list = dataLoad[1]
+            word_list = dataLoad[2]
+            removed_list = copy(file_name_list)
+            db.close()
+
+    # Check for new logos added and store them
+    for target in tqdm(os.listdir(targetlist_path)):
+        if target.startswith('.'): # skip hidden files
+            continue
+        for logo_path in os.listdir(os.path.join(targetlist_path, target)):
+            if logo_path.endswith('.png') or logo_path.endswith('.jpeg') or logo_path.endswith('.jpg') or logo_path.endswith('.PNG') \
+                                          or logo_path.endswith('.JPG') or logo_path.endswith('.JPEG'):
+                if logo_path.startswith('loginpage') or logo_path.startswith('homepage'): # skip homepage/loginpage
+                    continue
+                # Check if file is already in existing stored db
+                completePath = os.path.join(r'./src/siamese_pedia/expand_targetlist/', target, logo_path)
+                if completePath not in file_name_list:
+                    logo_feat_list.append(pred_siamese(img=os.path.join(targetlist_path, target, logo_path),
+                                                   model=model, grayscale=grayscale))
+                    file_name_list.append(completePath)
+                    image_file = Image.open("." + completePath)
+                    image_file = image_file.resize((int(image_file.width * (100 / image_file.height)), 100), resample=Image.BOX)
+                    ocr = keras_pipeline.recognize([np.asarray(image_file.convert("RGB"))])
+                    list_words = []
+                    for i in ocr:
+                        for j in i:
+                            list_words.append(j[0])
+                    word_list.append(list_words)
+                else:
+                    # Remove existing files to find out old files in DB
+                    if removed_list is not None:
+                        removed_list.remove(completePath)
+
+    if removed_list is not None:
+        for i in removed_list:
+            index = file_name_list.index(i)
+            print("Note: removed file from DB: " + str(index))
+            del file_name_list[index]
+            del logo_feat_list[index]
+            del word_list[index]
+
+    with open("../database.pickle", "wb") as db:
+        data = [logo_feat_list, file_name_list, word_list]
+        pickle.dump(data, db)
+        db.close()
+
+    return model, np.asarray(logo_feat_list), np.asarray(file_name_list), word_list
 
 # Original Phishpedia implementation
 def phishpedia_classifier_logo(logo_boxes,
@@ -110,10 +160,13 @@ def to_index(brand, counter, list):
     return counter, (counter + 1), list
 
 def lnet_phishpedia_classifier_logo(logo_boxes,
+                          logo_conf,
                           domain_map_path: str,
-                          model, logo_feat_list, file_name_list, shot_path: str,
+                          model, logo_feat_list, file_name_list, word_list, shot_path: str,
                           url: str,
-                          ts: float):
+                          ts: float,
+                          keras_pipeline,
+                          debug = False):
 
     '''
     Altered Version for Layout Network
@@ -135,6 +188,8 @@ def lnet_phishpedia_classifier_logo(logo_boxes,
     print('number of logo boxes:', len(logo_boxes))
 
     result = []
+    res_ops = []
+
     # run logo matcher
     pred_target = None
     if len(logo_boxes) > 0:
@@ -153,10 +208,11 @@ def lnet_phishpedia_classifier_logo(logo_boxes,
         for i, coord in enumerate(logo_boxes):
             min_x, min_y, max_x, max_y = coord
             bbox = [float(min_x), float(min_y), float(max_x), float(max_y)]
-            target_this, domain_this, this_conf = siamese_inference(model, domain_map,
-                                                                    logo_feat_list, file_name_list,
-                                                                    shot_path, bbox, t_s=ts, grayscale=False)
-
+            start = time.time()
+            target_this, domain_this, this_conf = lnet_siamese_inference(model, domain_map,
+                                                                    logo_feat_list, file_name_list, word_list,
+                                                                    shot_path, bbox, keras_pipeline=keras_pipeline, t_s=ts, grayscale=False)
+            print("Inference", time.time() - start)
             # Domain matcher to avoid FP
             if (target_this is not None) and (tldextract.extract(url).domain not in domain_this):
                 # FIXME: avoid fp due to godaddy domain parking, ignore webmail provider (ambiguous)
@@ -165,31 +221,40 @@ def lnet_phishpedia_classifier_logo(logo_boxes,
                     this_conf = None
                 else:
                     pred_target = target_this
+            else:
+                pred_target = target_this
 
             converted = brand_converter(pred_target)
+            print(converted)
             brand_index, counter, temp_list = to_index(converted, counter, temp_list)
 
             # Store data for OPS and add box to all_boxes
             if this_conf != None:
                 # Add siamese_inference threshold here as well
                 ops_boxes.append([min_x, min_y, max_x, max_y])
-                ops_scores.append(this_conf)
+                # Make sure non-logos have lower priority to not overshadow, yet preserve their order
+                if str(converted) == "None":
+                    ops_scores.append(float(ts - 0.01 - (1/logo_conf[i]) * 0.01))
+                else:
+                    ops_scores.append(float(this_conf))
+                # Take collision of all boxes into consideration
                 ops_indeces.append(1)
-
                 #Append for returning
-                all_boxes.append([min_x, min_y, max_x - min_x, max_y - min_y, converted, this_conf])
-
+                all_boxes.append([int(min_x), int(min_y), int(max_x - min_x), int(max_y - min_y), converted, this_conf, logo_conf[i]])
         # Remove overlapping bounding boxes with IoU > 10%
         indeces = []
+        print(all_boxes)
         if len(all_boxes) > 0:
-            indeces = ops.batched_nms(torch.tensor(ops_boxes), torch.tensor(ops_scores), torch.tensor(ops_indeces), float(0.05))
-
-        #  Remove logos with low confidence after OPS
+            indeces = ops.batched_nms(torch.tensor(ops_boxes), torch.tensor(ops_scores), torch.tensor(ops_indeces), float(0.1))
         result = []
         for i in indeces:
             box = all_boxes[i]
-            if box[5] > ts or (str(box[4]) == "None" and ts > 0.6):
+            print(box)
+            # Depending on non-logo or logo, decrease logoness score
+            if (str(box[4]) != "None" and box[5] > ts) or (str(box[4]) == "None" and box[5] > 0.5):
                 result.append(box)
-
-    return result
+                res_ops.append(ops_boxes[i])
+    if debug == True:
+        return result, res_ops
+    return result, []
 
