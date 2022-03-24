@@ -3,6 +3,7 @@ import argparse
 from io import StringIO
 import pickle
 import tqdm
+import time
 from lnet_main import main
 
 if __name__ == "__main__":
