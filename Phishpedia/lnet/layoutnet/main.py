@@ -18,13 +18,13 @@ sep = 3
 # Grid resolution for webpage histrogram
 grid = 7
 # Learning rate
-lr = 0.002
+lr = 0.001
 # Batch size
-batch_size = 4
+batch_size = 16
 # Epochs
-epochs = 16
+epochs = 50
 # Percentage of training data reserved for testing
-test_percentage = 0.01
+test_percentage = 0.1
 
 '''
             nn.Conv2d(sep * 2, 6, 3, stride=1, padding=2),
@@ -49,27 +49,88 @@ test_percentage = 0.01
     Network for checking how likely a logo is to be the identity logo
     Def
 '''
-class WebLayoutNet(nn.Module):
+class WebLayoutNet5(nn.Module):
 
     def __init__(self):
         super().__init__()
         self.softmax = nn.Softmax(dim=1)
         self.cnn_relu_stack = nn.Sequential(
-            nn.Conv3d(1, 16, (6, 1, 1), stride=1, padding=(0,1,1)),
+            nn.Conv3d(1, 16, (6, 1, 1), stride=(1, 1, 1), padding=0),
             nn.BatchNorm3d(16),
             nn.ReLU(),
-            nn.AvgPool3d((1, 2, 2), stride=(1, 1, 1), padding=0),
-            nn.Conv3d(16, 24, (3, 3, 3), stride=1, padding=1),
-            nn.BatchNorm3d(24),
+            nn.Conv3d(16, 16, (3, 2, 2), stride=1, padding=1),
+            nn.BatchNorm3d(16),
             nn.ReLU(),
-            nn.Conv3d(24, 36, (1, 8, 8), stride=1, padding=0),
-            nn.BatchNorm3d(36),
+            nn.Conv3d(16, 8, (1, 6, 6), stride=1, padding=0),
+            nn.BatchNorm3d(8),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(36, 24),
+            nn.Linear(8, 8),
             nn.ReLU(),
-            nn.Linear(24, 2)
+            nn.Linear(8, 2)
         )
+
+        ''' 
+        self.cnn_relu_stack = nn.Sequential(
+            nn.Conv3d(1, 16, (6, 1, 1), stride=1, padding=0),
+            nn.BatchNorm3d(16),
+            nn.ReLU(),
+            nn.Conv3d(16, 16, (3, 3, 3), stride=1, padding=1),
+            nn.BatchNorm3d(16),
+            nn.ReLU(),
+            nn.Conv3d(16, 8, (1, 7, 7), stride=1, padding=0),
+            nn.BatchNorm3d(8),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(8, 8),
+            nn.ReLU(),
+            nn.Linear(8, 2)
+        )'''
+
+    def forward(self, x):
+        logits = self.cnn_relu_stack(x)
+        return logits
+
+    def soft_forward(self, x):
+        return self.softmax(self.forward(x))
+
+class WebLayoutNet7(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.softmax = nn.Softmax(dim=1)
+        self.cnn_relu_stack = nn.Sequential(
+            nn.Conv3d(1, 16, (6, 1, 1), stride=(1, 1, 1), padding=0),
+            nn.BatchNorm3d(16),
+            nn.ReLU(),
+            nn.Conv3d(16, 16, (3, 3, 3), stride=1, padding=1),
+            nn.BatchNorm3d(16),
+            nn.ReLU(),
+            nn.Conv3d(16, 8, (1, 7, 7), stride=1, padding=0),
+            nn.BatchNorm3d(8),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(8, 8),
+            nn.ReLU(),
+            nn.Linear(8, 2)
+        )
+
+        ''' 
+        self.cnn_relu_stack = nn.Sequential(
+            nn.Conv3d(1, 16, (6, 1, 1), stride=1, padding=0),
+            nn.BatchNorm3d(16),
+            nn.ReLU(),
+            nn.Conv3d(16, 16, (3, 3, 3), stride=1, padding=1),
+            nn.BatchNorm3d(16),
+            nn.ReLU(),
+            nn.Conv3d(16, 8, (1, 7, 7), stride=1, padding=0),
+            nn.BatchNorm3d(8),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(8, 8),
+            nn.ReLU(),
+            nn.Linear(8, 2)
+        )'''
 
     def forward(self, x):
         logits = self.cnn_relu_stack(x)
@@ -104,12 +165,12 @@ if __name__ == "__main__":
     sets = [val_loader, orig_loader, exp_loader]
 
     # Define network
-    net = WebLayoutNet()
+    net = WebLayoutNet7()
 
     # Loss function and optimization algorithm
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9)
-    #optimizer = torch.optim.Adam(net.parameters(), lr=3e-4, weight_decay=2e-5)
+    #optimizer = torch.optim.Adam(net.parameters(), lr=3e-4, weight_decay=0)
     for epoch in range(epochs):  # loop over the dataset multiple times
 
         running_loss = 0.0
@@ -133,7 +194,7 @@ if __name__ == "__main__":
 
     print('Finished Training')
 
-    #torch.save(net.state_dict(), "model.pth")
+    #torch.save(net.state_dict(), "model-2-5x5.pth")
 
     # Softmax to get an estimate for the confidence (maps between 0 and 1)
     soft = nn.Softmax(dim=1)

@@ -1,10 +1,10 @@
 import torch
 import numpy
 from .WebLayoutData import direct_normalize_layout, calculate_bin, channel_of_logo
-from .main import WebLayoutNet
 
 # Times 1.2 since Phishpedia RPN doesnt propose exact boxes
-default_sizes = numpy.array([13, 53, 1023]) * 1.2
+#default_sizes = numpy.array([13, 53, 1023]) * 1.2
+default_sizes = numpy.array([1.9, 5, 25])
 '''
    Takes in the image resolution and bounding boxes.
    res = [width, height]
@@ -22,6 +22,9 @@ def format_to_layoutnet(res, bboxes):
         box["y"] = (i[1] / height) * 100
         box["width"] = (i[2] / width) * 100
         box["height"] = (i[3] / height) * 100
+        # Keeps scale
+        box["orig_width"] = (i[2] / max(width, height)) * 100
+        box["orig_height"] = (i[3] / max(width, height)) * 100
         boxes.append(box)
     return boxes
 
@@ -36,43 +39,53 @@ def load_model():
     model - from load_model
     all_boxes = [[x,y,width,height],...]
 '''
-def l_eval(model, device, res, all_boxes, debug=False):
+def l_eval(model5, model7, device, res, all_boxes, debug=False, getBoxes=False, y_offset=0):
     positive = []
     conf = []
-    grid = 7
-    cSep = 3
     boxes = format_to_layoutnet(res, all_boxes)
     norm = direct_normalize_layout(boxes, screen_res=res[0])
+
+    print("BOXES", boxes)
+
+    if norm > 20:
+        grid = 5
+        cSep = 3
+        model = model5
+    else:
+        grid = 7
+        cSep = 3
+        model = model7
 
     if len(boxes) > 0:
         bins = []
         for i in boxes:
-            bin = calculate_bin(grid, norm, i)
+            bin = calculate_bin(grid, norm, i, y_offset=y_offset)
             bins.append(bin)
         for i, iv in enumerate(boxes):
             p = numpy.zeros((cSep * 2, grid, grid), dtype=int)
             # Set to identity logo
-            p[channel_of_logo(cSep, default_sizes, iv["width"] * iv["height"], 0)][bins[i][0]][bins[i][1]] += 1
+            p[channel_of_logo(cSep, default_sizes, min(iv["orig_width"], iv["orig_height"]), 0)][bins[i][0]][bins[i][1]] += 1
             for j, jv in enumerate(boxes):
                 # Set to fake logo
                 if j != i:
-                    '''print(jv["width"] * jv["height"])'''
-                    p[channel_of_logo(cSep, default_sizes, jv["width"] * jv["height"], 1)][bins[j][0]][bins[j][1]] += 1
-            if device == 'cuda':
-                bin_box = torch.tensor(p).float().unsqueeze(0).unsqueeze(0).cuda()
-            else:
-                bin_box = torch.tensor(p).float().unsqueeze(0).unsqueeze(0)
+                    p[channel_of_logo(cSep, default_sizes, min(jv["orig_width"],jv["orig_height"]), 1)][bins[j][0]][bins[j][1]] += 1
+            bin_box = torch.tensor(p).float().unsqueeze(0).unsqueeze(0).to(device)
             with torch.no_grad():
                 predict = model.soft_forward(bin_box)
+                confidence = predict[0][1].cpu()
                 if debug is True:
                     print(bin_box)
                     print(predict)
                     print("---------------------------------")
                 # Scale required confidence depending on the number of logos detected
-                if predict[0][1] > min(0.39 + 0.12 * len(all_boxes), 0.87):
+                if confidence >= 0.05:
                     positive.append(i)
-                    conf.append(predict[0][1])
+                    conf.append(confidence)
+        if getBoxes:
+            return positive, conf, all_boxes
         return positive, conf
     else:
+        if getBoxes:
+            return [], [], []
         return [], []
 

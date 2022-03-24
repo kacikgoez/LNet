@@ -4,7 +4,7 @@ import json
 import numpy
 import random
 
-container_size = 1200
+container_size = 800
 
 # Diff. example 00175989-screenshot.png
 class WebData(Dataset):
@@ -49,7 +49,8 @@ class WebData(Dataset):
                     values = label["value"]
                     try:
                         if values["rectanglelabels"][0] != 0:
-                            self.logo_area[label["id"]] = values["width"] * values["height"]
+                            #self.logo_area[label["id"]] = values["width"] * values["height"]
+                            self.logo_area[label["id"]] = min(values["width"], values["height"])
                     except Exception as e:
                         webdata[i]["annotations"][0]["result"].pop(j)
 
@@ -146,6 +147,7 @@ class WebData(Dataset):
 
     def __getitem__(self, index):
         return self.logo_bin[index].unsqueeze(0), self.logo_class[index], self.logo_uri[index]
+        #return self.logo_bin[index], self.logo_class[index], self.logo_uri[index]
 
     def __len__(self):
         return len(self.logo_bin)
@@ -191,12 +193,12 @@ def normalize_layout(logos, screen_res = 1920):
     Calculates the binning:
         INPUT: grid resolution, normalization offset, 
 '''
-def calculate_bin(grid, norm_offset, values):
+def calculate_bin(grid, x_norm_offset, values, y_offset=0):
     # Calculate
-    xdiv = (100 - 2 * norm_offset) / grid
-    ydiv = 100 / grid
-    return numpy.array([(values["y"] + (values["height"] / 2)) // ydiv,
-                        max(0, (values["x"] - norm_offset + (values["width"] / 2))) // xdiv], dtype=int)
+    xdiv = (100 - 2 * x_norm_offset) / grid
+    ydiv = (100 - y_offset) / grid
+    return numpy.array([(values["y"] - y_offset + (values["height"] / 2)) // ydiv,
+                        max(0, (values["x"] - x_norm_offset + (values["width"] / 2))) // xdiv], dtype=int)
 
 
 # Index of logo, logo or not logo channel (0 = logo, 1 = not logo)
@@ -214,14 +216,14 @@ def channel_of_logo(cSep, size_channels, logo_size, tof=1):
         - RETURN: offset
 '''
 def direct_normalize_layout(logos, screen_res = 1920):
-    # Get border of container on x axis for the left side
+    # Get border of conormalintainer on x axis for the left side
     if screen_res > container_size:
         min_left = (1920/2) - (container_size/2)
         # Get border of container on x axis for the right side
         max_right = (1920/2) + (container_size/2)
         for j, label in enumerate(logos):
             values = label
-            pmin = int(values["x"] * 1920)
+            pmin = int((values["x"] / 100) * 1920)
             pmax = int(((values["x"] + values["width"]) / 100) * 1920)
             if pmin < min_left:
                 # Add some margin to left (5px)
