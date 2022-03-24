@@ -15,7 +15,7 @@ keras_pipeline = keras_ocr.pipeline.Pipeline()
 # element recognition model -- logo only
 cfg_path = '../src/detectron2_pedia/configs/faster_rcnn.yaml'
 # navbar, info, button, popup recongnition
-cfg_path2 = './layoutnet/faster_rcnn.yaml'
+cfg_path2 = './navbar/configs/faster_rcnn.yaml'
 # Weights to logo network
 weights_path = '../src/detectron2_pedia/output/rcnn_2/rcnn_bet365.pth'
 # Weights advanced network
