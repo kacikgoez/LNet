@@ -13,13 +13,13 @@ def pred_rcnn(im, predictor):
     :param predictor:
     :return:
     '''
-    im = cv2.imread(im)
     outputs = predictor(im)
 
     instances = outputs['instances']
     pred_classes = instances.pred_classes  # tensor
     pred_boxes = instances.pred_boxes  # Boxes object
 
+    # ignore this comment: 0 = button, 1 = info, 2 =  nav, 3 = pop
     logo_boxes = pred_boxes[pred_classes == 1].tensor
     input_boxes = pred_boxes[pred_classes == 0].tensor
 
@@ -28,6 +28,34 @@ def pred_rcnn(im, predictor):
     input_scores = scores[pred_classes == 0]
 
     return logo_boxes, logo_scores, input_boxes, input_scores
+
+def nav_rcnn(im, predictor):
+    '''
+    Perform inference for RCNN
+    :param im:
+    :param predictor:
+    :return:
+    '''
+    outputs = predictor(im)
+
+    instances = outputs['instances']
+    pred_classes = instances.pred_classes  # tensor
+    pred_boxes = instances.pred_boxes  # Boxes object
+
+    # ignore this comment: 0 = button, 1 = info, 2 =  nav, 3 = pop
+    button_boxes = pred_boxes[pred_classes == 0].tensor
+    # Cookie boxes or other types of information
+    info_boxes = pred_boxes[pred_classes == 1].tensor
+    nav_boxes = pred_boxes[pred_classes == 2].tensor
+    popup_boxes = pred_boxes[pred_classes == 3].tensor
+
+    scores = instances.scores  # tensor
+    button_scores = scores[pred_classes == 0]
+    nav_scores = scores[pred_classes == 2]
+    info_scores = scores[pred_classes == 1]
+    popup_scores = scores[pred_classes == 3]
+
+    return button_boxes, button_scores, info_scores, info_boxes, nav_boxes, nav_scores, popup_boxes, popup_scores
 
 
 def config_rcnn(cfg_path, device, weights_path, conf_threshold):
