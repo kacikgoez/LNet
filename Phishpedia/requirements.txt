@@ -21,7 +21,6 @@ advertorch
 python-telegram-bot
 gspread
 oauth2client
-
-
-
-
+python-Levenshtein
+keras_ocr
+pytesseract==0.3.8
